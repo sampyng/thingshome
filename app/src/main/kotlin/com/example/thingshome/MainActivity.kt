@@ -1,16 +1,22 @@
 package com.example.thingshome
 
-import androidx.appcompat.app.AppCompatActivity
+import android.os.Build
 import android.os.Bundle
-import java.io.IOException
 import android.util.Log
-import com.google.android.things.contrib.driver.button.Button
+import androidx.appcompat.app.AppCompatActivity
+import com.google.android.things.pio.Gpio
+import com.google.android.things.pio.GpioCallback
+import com.google.android.things.pio.PeripheralManager
+import java.io.IOException
+
 
 private val TAG = MainActivity::class.java.simpleName
-private val gpioButtonPinName = "BUS NAME"
+private const val DEVICE_RPI = "rpi3"
+private val BUTTON_PIN_NAME = if (Build.DEVICE == DEVICE_RPI) "BCM21" else "GPIO6_IO14"
 
-class MainActivity : AppCompatActivity() {
-    private lateinit var mButton: Button
+class MainActivity : AppCompatActivity(), GpioCallback {
+    // GPIO connection to button input
+    private lateinit var buttonGpio: Gpio
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -22,31 +28,42 @@ class MainActivity : AppCompatActivity() {
         destroyButton()
     }
 
-    private fun setupButton() {
+    override fun onGpioEdge(gpio: Gpio?): Boolean {
         try {
-            mButton = Button(
-                gpioButtonPinName,
-                // high signal indicates the button is pressed
-                // use with a pull-down resistor
-                Button.LogicState.PRESSED_WHEN_HIGH
-            )
-            mButton.setOnButtonEventListener(object : Button.OnButtonEventListener {
-                override fun onButtonEvent(button: Button, pressed: Boolean) {
-                    // do something awesome
-                }
-            })
+            Log.i(TAG, "GPIO changed, button " + gpio?.value)
         } catch (e: IOException) {
-            // couldn't configure the button...
+            Log.w(TAG, "Error reading GPIO")
         }
 
+        // Return true to keep callback active.
+        return true
+    }
+
+    private fun setupButton() {
+        try {
+            val pioManager = PeripheralManager.getInstance()
+            Log.d(TAG, "Available GPIO: " + pioManager.gpioList)
+
+            buttonGpio = pioManager.openGpio(BUTTON_PIN_NAME)
+            // Configure as an input, trigger events on every change.
+            buttonGpio.setDirection(Gpio.DIRECTION_IN)
+            buttonGpio.setEdgeTriggerType(Gpio.EDGE_BOTH)
+            // Value is true when the pin is LOW
+            buttonGpio.setActiveType(Gpio.ACTIVE_LOW)
+            // Register the event callback.
+            buttonGpio.registerGpioCallback(this)
+        } catch (e: IOException) {
+            Log.w(TAG, "Error opening GPIO", e)
+        }
     }
 
     private fun destroyButton() {
-        Log.i(TAG, "Closing button")
+        // Close the button
+        buttonGpio.unregisterGpioCallback(this)
         try {
-            mButton.close()
+            buttonGpio.close()
         } catch (e: IOException) {
-            Log.e(TAG, "Error closing button", e)
+            Log.w(TAG, "Error closing GPIO", e)
         }
     }
 
